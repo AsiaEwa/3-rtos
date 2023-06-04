@@ -1,0 +1,205 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+/*Define following constants*/
+#define DATA_MES "/data_mes"/*_____________*/
+#define MUTEX   "/mutex_lock" /*_____________*/
+
+#define NumThreads 2
+
+typedef struct data_str_t{
+  int var1;
+  int var2;
+  int var3;
+} ;
+
+/*Define pointer of the  shared data structure*/
+struct data_str_t *mydata;
+
+/*Define pointer of the  mutex variable*/
+pthread_mutex_t *mutex;/*_____________*/
+
+/*main thread's function*/
+void *update_thread(void *i);
+
+char *progname = "MutexProcess_1";
+
+int main(int argc, char** argv)
+{
+  pthread_t threadID[NumThreads]; /*array of threads id*/
+  pthread_attr_t attrib;          /*struct of thread's attributes*/
+  struct sched_param param;       /*struct of scheduling parameters*/
+  int policy; 					  /*scheduling policy*/
+  int oldcancel;
+  int i,error;
+
+  int des_data, des_mutex;
+  int mode = S_IRWXU | S_IRWXG;
+
+  /*Creating file descriptor of the mutex object*/
+  /*__________________________________________________________*/
+  des_mutex = shm_open(MUTEX,O_CREAT|O_RDWR|O_TRUNC,mode);
+  if (des_mutex < 0){
+    perror("failure on shm_open on des_mutex");
+    exit(1);
+  }
+
+  if (ftruncate(des_mutex, sizeof(pthread_mutex_t)) == -1){
+    perror("Error on ftruncate to sizeof pthread_cond_t\n");
+    exit(-1);
+  }
+
+  /* Shared memory allocating for the mutex object*/
+  /*__________________________________________________________*/
+  mutex=(pthread_mutex_t*) mmap (NULL, sizeof(pthread_mutex_t), PROT_READ|PROT_WRITE,MAP_SHARED,des_mutex,0);
+  if (mutex == MAP_FAILED )
+  {
+    perror("Error on mmap on mutex\n");
+    exit(1);
+  }
+
+  /*Creating file descriptor of the shared structure*/
+  /*__________________________________________________________*/
+  des_data=shm_open(DATA_MES,O_CREAT|O_RDWR|O_TRUNC,mode);
+  if (des_data < 0){
+    perror("failure on shm_open on des_mutex");
+    exit(1);
+  }
+
+  if (ftruncate(des_data, sizeof(struct data_str_t)) == -1){
+    perror("Error on ftruncate to sizeof struct data_str_t\n");
+    exit(-1);
+  }
+
+  /* Shared memory allocating for the shared structure*/
+  /*__________________________________________________________*/
+  mydata=(struct data_str_t*)mmap(NULL,sizeof(struct data_str_t),PROT_READ | PROT_WRITE,MAP_SHARED,des_data,0);
+  if (mydata == MAP_FAILED ){
+    perror("Error on mmap on mydata\n");
+    exit(1);
+  }
+  /* set mutex shared between processes */
+  pthread_mutexattr_t mutexAttr;
+  pthread_mutexattr_setpshared(&mutexAttr, PTHREAD_PROCESS_SHARED);/*________________*/
+  pthread_mutex_init(mutex, &mutexAttr);
+
+  mydata->var1 = 0;
+  mydata->var2 = 0;
+  mydata->var3 = 0;
+
+  printf("%s: starting, creating theads ...\n", progname);
+
+  error=pthread_getschedparam( pthread_self(), &policy, &param );
+  if(error!=0){
+      printf("%s: failed to get priority\n", progname);
+  }
+
+  /*initializing structure of thread's attributes*/
+  error=pthread_attr_init(&attrib);
+  if(error!=0){
+      printf("%s: failed to init attribute \n", progname);
+  }
+  /*independent scheduling policy and priorities of threads */
+  pthread_attr_setinheritsched(&attrib, PTHREAD_EXPLICIT_SCHED);
+
+  /*setting a new scheduling policy - round-robin algorithm*/
+  error=pthread_attr_setschedpolicy(&attrib, SCHED_RR);
+  if(error!=0){
+      printf("failed to set sched policy\n");
+  }
+
+  param.sched_priority = 20;
+
+  /*set thread's attributes and scheduling policy*/
+  error=pthread_attr_setschedparam( &attrib, &param );
+  if(error!=0){
+      printf("failed to set priority\n");
+  }
+
+  pthread_setcanceltype( PTHREAD_CANCEL_ASYNCHRONOUS, &oldcancel );
+
+  for(i = 0; i < NumThreads; i++){
+		/*creating new threads, they start job in update_thread function*/
+		pthread_create( &threadID[i], &attrib, &update_thread, (void *)i);
+  }
+
+  /*wait some time, threads do their job */
+  sleep(40);
+
+  printf("%s: stopping, canceling threads ... \n", progname);
+
+  /*canceling threads*/
+  for(i = 0; i < NumThreads; i++){
+		pthread_cancel( threadID[i]);
+  }
+
+  printf("%s: all done, var1 = %d, var2 = %d\n", progname, mydata->var1, mydata->var2);
+  return EXIT_SUCCESS;
+
+}
+
+/*thread does some work*/
+void do_work(int thi){
+	static int var3;
+
+	var3++;
+	if(!(var3 % 10000000))    //10000000
+		printf("%s: thread %d did some work\n",progname, (thi) ); //(int)pthread_self() );
+}
+
+/*main function of the threads*/
+void *update_thread(void *i){
+	struct timespec req = {0};
+	int milisec = 1000;
+	int lpolicy;
+	struct sched_param lparam;
+	req.tv_sec = 0;
+	req.tv_nsec = milisec * 1000L; //1us
+	int thid = (int)(i);
+
+	pthread_getschedparam( pthread_self(), &lpolicy, &lparam );
+	printf("%s: thread %d with priority: %d \n",
+			progname, (int)(i), (int)lparam.sched_priority );
+
+	while(1){
+		/* Begin of the critical section*/
+        /*__________________________________________________________*/
+		pthread_mutex_lock(mutex);
+		if((mydata->var1 != mydata->var2) || (mydata->var2 != mydata->var3)){
+			mydata->var2 = mydata->var1;
+			mydata->var3 = mydata->var1;
+
+			/* End of the critical section*/
+	        /*__________________________________________________________*/
+			pthread_mutex_unlock(mutex);
+			printf("%s: thread %d with priority: %d, var1 (%d) != var2 (%d) != var3 (%d) !\n",
+					progname, thid, (int)lparam.sched_priority, mydata->var1, mydata->var2, mydata->var3);
+		}
+		else
+			/* End of the critical section*/
+	        /*__________________________________________________________*/
+			pthread_mutex_unlock(mutex);
+		/*thread does some work*/
+		do_work(thid);
+
+		/* Begin of the critical section*/
+        /*__________________________________________________________*/
+		pthread_mutex_lock(mutex);
+		mydata->var1++;
+		mydata->var2++;
+		mydata->var3++;
+		//nanosleep(&req, (struct timespec *)NULL);
+		/* End of the critical section*/
+        /*__________________________________________________________*/
+		pthread_mutex_unlock(mutex);
+	}
+	return (NULL);
+}
