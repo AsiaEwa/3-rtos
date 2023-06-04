@@ -1,0 +1,143 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
+#include <time.h>
+#include <sys/resource.h>
+#include <semaphore.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <malloc.h>
+#include <string.h>
+#include <errno.h>
+
+#define NumConsThreads 5
+
+/*Name of the shared memory area for unnamed semaphores*/
+#define SEM_NAME "/Semex"
+#define UNNSEM "/Unnsem"
+
+void *consumer(void *i);
+
+char *progname = "SemProc2";
+
+sem_t *mySemaphore;
+
+int main(void) {
+	pthread_t ConsthreadID[NumConsThreads];
+	pthread_t ProdthreadID;
+	int des_sem;
+	int mode = S_IRWXU | S_IRWXG;
+	pthread_attr_t attrib;          /*struct of thread's attributes*/
+	struct sched_param param;       /*struct of scheduling parameters*/
+	int policy;						/*scheduling policy*/
+	int oldcancel;
+	int i=0,error;
+
+//#define Named
+#ifdef Named
+	printf("%s: named semaphore ...\n", progname);
+
+	/*sem_open creates and registers named semaphore*/
+	mySemaphore = sem_open(SEM_NAME, O_CREAT|O_EXCL, S_IRWXU, 0);
+	/*sem_unlink removes semaphore's name form file system, which in this case is a part of name space  */
+	sem_unlink(SEM_NAME);
+#else
+	printf("%s: unnamed semaphore ...\n", progname);
+
+	/*Creating file descriptor of the unnamed semaphore*/
+	/*_________________________________________________*/
+	des_sem=shm_open(UNNSEM , O_CREAT|O_RDWR,mode);
+	if (des_sem < 0) {
+	  perror("failure on shm_open on des_sem");
+	  exit(1);
+	}
+
+	if (ftruncate(des_sem, sizeof(sem_t)) == -1) {
+	  perror("Error on ftruncate to sizeof sem_t\n");
+	  exit(-1);
+	}
+
+	/* Shared memory allocating for the unnamed semaphore*/
+	/*___________________________________________________*/
+	mySemaphore=(sem_t*)mmap(NULL,sizeof(sem_t),PROT_READ|PROT_WRITE,MAP_SHARED,des_sem,0);
+	if (mySemaphore == MAP_FAILED ) {
+	  perror("Error on mmap on mySemaphore\n");
+	  exit(1);
+	}
+
+	/*semaphore's initialization*/
+	/*___________________________________________________*/
+	sem_init(mySemaphore,1,0);
+	#endif
+
+	printf("%s: starting, creating theads ...\n", progname);
+	error=pthread_getschedparam( pthread_self(), &policy, &param );
+	if(error!=0){
+	  printf("%s: failed to get priority\n", progname);
+	}
+
+	/*initializing structure of thread's attributes*/
+	error=pthread_attr_init(&attrib);
+	if(error!=0){
+	  printf("%s: failed to init attribute \n", progname);
+	}
+	/*independent scheduling policy and priorities of threads */
+	pthread_attr_setinheritsched(&attrib, PTHREAD_EXPLICIT_SCHED);
+
+	/*setting a new scheduling policy - round-robin algorithm*/
+	error=pthread_attr_setschedpolicy(&attrib, SCHED_RR);
+	if(error!=0){
+	  printf("failed to set sched policy\n");
+	}
+
+	param.sched_priority = 20;
+
+	/*set thread's attributes and scheduling policy*/
+	error=pthread_attr_setschedparam( &attrib, &param );
+	if(error!=0){
+	  printf("failed to set priority\n");
+	}
+
+	pthread_setcanceltype( PTHREAD_CANCEL_ASYNCHRONOUS, &oldcancel );
+
+	for(i = 0; i < NumConsThreads; i++){
+		pthread_create( &ConsthreadID[i], NULL, consumer, (void *)i);
+	}
+
+	sleep(60);
+
+	printf("%s: stopping, canceling threads ... \n", progname);
+
+	for(i = 0; i < NumConsThreads; i++){
+		pthread_cancel( ConsthreadID[i]);
+	}
+
+	pthread_cancel( ProdthreadID);
+
+	printf("%s: main exiting \n", progname );
+	return EXIT_SUCCESS;
+}
+
+/*consumer thread*/
+void *consumer(void *i){
+	struct timespec req = {0};
+	int milisec = 1;
+	int lpolicy;
+	struct sched_param lparam;
+	req.tv_sec = 0;
+	req.tv_nsec = milisec * 1000000L; //milisec*1ms
+
+	while(1){
+		nanosleep(&req, (struct timespec *)NULL);
+
+		/*sem_wait decrements (locks) semaphore*/
+		/*_______________________________________*/
+		sem_wait(mySemaphore);
+		printf("%s: consumer %d, get semaphore \n", progname, (int)i );
+	}
+	return (NULL);
+}
