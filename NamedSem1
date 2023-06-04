@@ -1,0 +1,101 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
+#include <time.h>
+#include <sys/resource.h>
+#include <semaphore.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <malloc.h>
+#include <string.h>
+#include <errno.h>
+
+/*Name of the named semaphore*/
+#define SEM_NAME "/Semex"
+
+void *producer(void *i);
+
+char *progname = "NamedSem1";
+
+sem_t *mySemaphore;
+
+int main(void) {
+	pthread_t ProdthreadID;
+	int des_sem;
+	int mode = S_IRWXU | S_IRWXG;
+	int i;
+
+#define Named
+#ifdef Named
+	printf("%s: named semaphore ...\n", progname);
+
+	/*sem_open creates and registers named semaphore in the namespace (system file) */
+    /*____________________________________________*/
+	mySemaphore=sem_open(SEM_NAME,O_CREAT|O_RDWR,S_IRWXU,0777);
+#else
+	printf("%s: unnamed semaphore ...\n", progname);
+
+	  des_sem = shm_open(UNNSEM, O_CREAT | O_RDWR | O_TRUNC, mode);
+	  if (des_sem < 0) {
+	    perror("failure on shm_open on des_sem");
+	    exit(1);
+	  }
+
+	  if (ftruncate(des_sem, sizeof(sem_t)) == -1) {
+	    perror("Error on ftruncate to sizeof sem_t\n");
+	    exit(-1);
+	  }
+
+	  mySemaphore = (sem_t*) mmap(NULL, sizeof(sem_t),
+	        PROT_READ | PROT_WRITE, MAP_SHARED, des_sem, 0);
+	  if (mySemaphore == MAP_FAILED ) {
+	    perror("Error on mmap on mySemaphore\n");
+	    exit(1);
+	  }
+
+	/*allocating resources for semaphore object*/
+	//mySemaphore = malloc(sizeof(sem_t));
+	/*semaphore's initialization*/
+	sem_init(mySemaphore, 1, 0);
+#endif
+
+	printf("%s: starting, creating theads ...\n", progname);
+
+	pthread_create( &ProdthreadID, NULL, producer, (void *)i);
+
+	sleep(60);
+
+	printf("%s: stopping, canceling threads ... \n", progname);
+
+	pthread_cancel( ProdthreadID);
+	/*sem_unlink removes semaphore's name form file system, which in this case is a part of name space  */
+	sem_unlink(SEM_NAME);
+
+	printf("%s: main exiting \n", progname );
+	return EXIT_SUCCESS;
+}
+
+/*producer thread*/
+void *producer(void *i){
+	struct timespec req = {0};
+	int milisec = 1;
+	int lpolicy;
+	struct sched_param lparam;
+	req.tv_sec = 0;
+	req.tv_nsec = milisec * 1000000L; //milisec*1ms
+
+	while(1){
+		//nanosleep(&req, (struct timespec *)NULL);
+		printf("%s: producer %d, posted semaphore \n", progname, (int)i );
+
+		//sleep(1);
+		/*sem_post increments (unlocks) semaphore*/
+		/*_______________________________________*/
+		sem_post(mySemaphore);
+	}
+	return (NULL);
+}
