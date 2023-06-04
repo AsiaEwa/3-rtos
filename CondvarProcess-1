@@ -1,0 +1,237 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+/*Define following constants*/
+#define CONDVAR "/CONDVAR"
+#define STATE "/STATE"
+#define MUTEX "/MUTEX_LOCK"
+
+/*Define number of threads*/
+#define NumThreads 2
+
+/*Main function of the thread 0 - state 0*/
+void *state_0(void *);
+
+/*Main function of the thread 1 - state 3*/
+void *state_3(void *);
+
+pthread_cond_t*  condvar;
+pthread_mutex_t*  mutex;
+int* state;
+char *progname = "CondVar1";
+
+int main(int argc, char** argv) {
+
+int des_condvar, des_state, des_mutex;
+int mode = S_IRWXU | S_IRWXG;
+pthread_t threadID[NumThreads];
+pthread_attr_t attrib;          /*struct of thread's attributes*/
+struct sched_param param;       /*struct of scheduling parameters*/
+int policy;						/*scheduling policy*/
+int oldcancel;
+int i=0,error;
+
+  /*Creating file descriptor of the mutex object*/
+  /*____________________________________________*/
+des_mutex=shm_open(MUTEX,O_CREAT|O_RDWR|O_TRUNC,mode);
+  if (des_mutex < 0) {
+    perror("failure on shm_open on des_mutex");
+    exit(1);
+  }
+
+  if (ftruncate(des_mutex, sizeof(pthread_mutex_t)) == -1) {
+    perror("Error on ftruncate to sizeof pthread_cond_t\n");
+    exit(-1);
+  }
+
+  /* Shared memory allocating for the mutex object*/
+  /*____________________________________________*/
+  mutex=(pthread_mutex_t*)mmap(NULL,sizeof(pthread_mutex_t),PROT_READ|PROT_WRITE,MAP_SHARED,des_mutex,0);
+  if (mutex == MAP_FAILED ) {
+    perror("Error on mmap on mutex\n");
+    exit(1);
+  }
+
+  /*Creating file descriptor of the conditional variable object*/
+  /*____________________________________________*/
+  des_condvar=shm_open(CONDVAR,O_CREAT|O_RDWR|O_TRUNC,mode);
+  if (des_condvar < 0) {
+    perror("failure on shm_open on des_condvar");
+    exit(1);
+  }
+
+  if (ftruncate(des_condvar, sizeof(pthread_cond_t)) == -1) {
+    perror("Error on ftruncate to sizeof pthread_cond_t\n");
+    exit(-1);
+  }
+
+  /* Shared memory allocating for the conditional variable object*/
+  /*____________________________________________*/
+  condvar=(pthread_cond_t*)mmap(NULL,sizeof(pthread_cond_t),PROT_READ|PROT_WRITE,MAP_SHARED,des_condvar,0);
+  if (condvar == MAP_FAILED ) {
+    perror("Error on mmap on condvar\n");
+    exit(1);
+  }
+
+  /*Creating file descriptor of the shared variable state */
+  /*____________________________________________*/
+  des_state=shm_open(STATE,O_CREAT|O_RDWR|O_TRUNC,mode);
+  if (des_condvar < 0) {
+    perror("failure on shm_open on des_state");
+    exit(1);
+  }
+
+  if (ftruncate(des_state, sizeof(int)) == -1) {
+    perror("Error on ftruncate to sizeof int\n");
+    exit(-1);
+  }
+
+  /* Shared memory allocating for the shared variable state*/
+  /*____________________________________________*/
+  state=(int*)mmap(NULL,sizeof(int),PROT_READ|PROT_WRITE,MAP_SHARED,des_state,0);
+  if (state == MAP_FAILED ) {
+    perror("Error on mmap on state\n");
+    exit(1);
+  }
+
+  /* set mutex shared between processes */
+  pthread_mutexattr_t mutexAttr;
+  pthread_mutexattr_setpshared(&mutexAttr, PTHREAD_PROCESS_SHARED);
+  pthread_mutex_init(mutex, &mutexAttr);
+
+  /* set condition shared between processes */
+  pthread_condattr_t condAttr;
+  pthread_condattr_setpshared(&condAttr, PTHREAD_PROCESS_SHARED);
+  pthread_cond_init(condvar, &condAttr);
+
+  printf("%s: starting, creating theads ...\n", progname);
+
+  error=pthread_getschedparam( pthread_self(), &policy, &param );
+  if(error!=0){
+      printf("%s: failed to get priority\n", progname);
+  }
+
+  /*initializing structure of thread's attributes*/
+  error=pthread_attr_init(&attrib);
+  if(error!=0){
+      printf("%s: failed to init attribute \n", progname);
+  }
+  /*independent scheduling policy and priorities of threads */
+  pthread_attr_setinheritsched(&attrib, PTHREAD_EXPLICIT_SCHED);
+
+  /*setting a new scheduling policy - round-robin algorithm*/
+  error=pthread_attr_setschedpolicy(&attrib, SCHED_RR);
+  if(error!=0){
+      printf("failed to set sched policy\n");
+  }
+
+  param.sched_priority = 20;
+
+  /*set thread's attributes and scheduling policy*/
+  error=pthread_attr_setschedparam( &attrib, &param );
+  if(error!=0){
+      printf("failed to set priority\n");
+  }
+
+  pthread_setcanceltype( PTHREAD_CANCEL_ASYNCHRONOUS, &oldcancel );
+  *state = 0;
+  sleep(4);
+  i=0;
+  pthread_create( (pthread_t*)&threadID[0], &attrib, &state_0, (void *)i);
+  i=3;
+  pthread_create((pthread_t*)&threadID[1],&attrib,&state_3,(void*)i);
+  /*wait while threads do their jobs*/
+  sleep(60);
+
+  printf("%s: stopping, canceling threads ... \n", progname);
+
+  for(i = 0; i < NumThreads; i++){
+	pthread_cancel( threadID[i]);
+  }
+
+  printf("%s: main exiting\n", progname );
+
+  pthread_condattr_destroy(&condAttr);
+  pthread_mutexattr_destroy(&mutexAttr);
+  pthread_mutex_destroy(mutex);
+  pthread_cond_destroy(condvar);
+
+  shm_unlink(CONDVAR);
+  shm_unlink(STATE);
+  shm_unlink(MUTEX);
+
+
+  return EXIT_SUCCESS;
+
+}
+
+/* state_0 thread is producer*/
+void *state_0(void *arg){
+	struct timespec req = {0};
+	int milisec = 1000;
+	int lpolicy;
+	struct sched_param lparam;
+	req.tv_sec = 0;
+	req.tv_nsec = milisec * 1000000L; //1ms
+
+	while(1){
+		/*Starting the  critical section*/
+		pthread_mutex_lock(mutex);
+		while(*state != 0){
+			/*waiting for conditional variable's state changing and releasing mutex*/
+			pthread_cond_wait(condvar, mutex);
+
+		}
+		/*changing state to 1 */
+		*state = 1;
+		printf("%s: transit 0 - > %d!\n",
+					progname, (int)(*state) );
+
+		//nanosleep(&req, (struct timespec *)NULL);
+
+		/*signaling conditional variable's state changing */
+		sleep(1);
+		//pthread_cond_broadcast(condvar);
+		pthread_cond_signal(condvar);
+
+		/*ending the critical section*/
+	pthread_mutex_unlock(mutex);
+
+	}
+	return (NULL);
+}
+
+/* state_1 thread is consumer*/
+void *state_3(void *arg){
+	struct timespec req = {0};
+	int milisec = 1000;
+	int lpolicy,i;
+	struct sched_param lparam;
+	req.tv_sec = 0;
+	req.tv_nsec = milisec * 1000000L; //1ms
+
+	while(1){
+		pthread_mutex_lock(mutex);
+		while(*state!=3){
+			pthread_cond_wait(condvar,mutex);
+		}
+		*state=0;
+		printf("%s: transit 3 -> %d!\n",progname,(int)(*state));
+
+		//pthread_cond_broadcast(condvar);
+		pthread_cond_signal(condvar);
+
+		pthread_mutex_unlock(mutex);
+	}
+	return (NULL);
+}
+
+
