@@ -183,13 +183,13 @@ offlags Create and open mode flags: O_RDONLY, O_RDWR, O_WRONLY. When the semapho
 Closing a named semaphore - function sem_close int sem_close( sem_t * sem) The function releases the resources of the semaphore and unblocks processes that are blocked on it.
 
 semaphore operations in the POSIX standard:
-*sem_open - creating a named semaphore
-*sem_init - emaphore initialization
-*sem_wait - waiting at the semaphore
-*sem_trywait - downloading the resource
-*sem_timewait - waiting to expire
-*sem_post - signaling
-*sem_close - closing the semaphore
-*sem_unlink - semaphore deletion
+* sem_open - creating a named semaphore
+* sem_init - emaphore initialization
+* sem_wait - waiting at the semaphore
+* sem_trywait - downloading the resource
+* sem_timewait - waiting to expire
+* sem_post - signaling
+* sem_close - closing the semaphore
+* sem_unlink - semaphore deletion
 
   
