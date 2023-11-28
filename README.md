@@ -164,25 +164,32 @@ An unnamed semaphore is accessed via the semaphore address. Hence the name unnam
 Before a semaphore can be used, it must be declared as an object of type sem_t and the memory used by the semaphore must be explicitly allocated to it. If the semaphore is to be used in different processes, it should be placed in previously allocated shared memory.
 1. Create a memory segment using the shm_open function.
 2. Specify the segment dimension using the ftrunc function.
-3. Map the shared memory area in the process data space - mmap. Semaphore initialization - sem_init function Before use, the semaphore should be initialized. int sem_init(sem_t *sem, int pshared, unsigned value)
+3. Map the shared memory area in the process data space - mmap. Semaphore initialization - sem_init function
+
+Before use, the semaphore should be initialized. int sem_init(sem_t *sem, int pshared, unsigned value)
+
 (pshared: When the value is non-zero, the semaphore can be placed in shared memory and accessed by multiple processes; value The initial value of the semaphore)
+
 Waiting on a semaphore – sem_wait sem_wait(S) function. int sem_timedwait(sem_t *sem, struc timespec timeout)
 Signaling on the semaphore – sem_post function: int sem_post(sem_t *sem)
 Deleting a semaphore: int sem_destroy(sem_t *sem)
+
 SEMAPHORES NAMED:
-Named semaphores are accessed by name. This type of semaphore is more suitable for synchronizing processes than threads. Unnamed semaphores run faster than named ones. Named semaphores are identified in processes by their name. A named semaphore is operated in the same way as an unnamed semaphore, except for the functions of opening and closing the semaphore. Opening a semaphore - sem_open function To use a named semaphore, access it via the function: sem_t *sem_open(const char *sem_name, int oflags, [int mode, int value]) sem_name The name of the semaphore should start with the "/" character.
+Named semaphores are accessed by name. This type of semaphore is more suitable for synchronizing processes than threads. Unnamed semaphores run faster than named ones. Named semaphores are identified in processes by their name. A named semaphore is operated in the same way as an unnamed semaphore, except for the functions of opening and closing the semaphore. 
+
+Opening a semaphore - sem_open function To use a named semaphore, access it via the function: sem_t *sem_open(const char *sem_name, int oflags, [int mode, int value]) sem_name The name of the semaphore should start with the "/" character.
+
 offlags Create and open mode flags: O_RDONLY, O_RDWR, O_WRONLY. When the semaphore is created, use the O_CREAT flag
 Closing a named semaphore - function sem_close int sem_close( sem_t * sem) The function releases the resources of the semaphore and unblocks processes that are blocked on it.
 
-
 semaphore operations in the POSIX standard:
-sem_open - creating a named semaphore
-sem_init - emaphore initialization
-sem_wait - waiting at the semaphore
-sem_trywait - downloading the resource
-sem_timewait - waiting to expire
-sem_post - signaling
-sem_close - closing the semaphore
-sem_unlink - semaphore deletion
+*sem_open - creating a named semaphore
+*sem_init - emaphore initialization
+*sem_wait - waiting at the semaphore
+*sem_trywait - downloading the resource
+*sem_timewait - waiting to expire
+*sem_post - signaling
+*sem_close - closing the semaphore
+*sem_unlink - semaphore deletion
 
   
